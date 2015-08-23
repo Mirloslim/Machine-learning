@@ -1,0 +1,208 @@
+---
+title: "Prediction of Exercise Manner"
+author: "Chu Ying"
+date: "Sunday, August 23, 2015"
+output: html_document
+---
+
+The scripts have been solely produced, tested and executed on Windows 7 Professional, and RStudio Version 0.98.1091.
+
+### 1.0 Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### 1.1 Overview
+The goal of this project is to predict the manner in which they did the exercise, which maps to the "classe" variable in the training set. This report will describe how the model is built, which cross validation is used, what the expected out of sample error would be, and why the choices are made. The prediction model would also be applied to predict 20 different test cases. 
+
+### 1.2 Data Sources
+The **training data** for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The **test data** are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### 1.3 Reproduceabilty
+In order to reproduce the same results, you need to perform the following actions:
+
+1. Install the required libraries as stated this report. E.g.
+To install "caret" package in R, run this command: **install.packages("caret")**.
+2. Set your pseudo random seed equal to one stated in this report. 
+
+```{r echo=TRUE}
+
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+library(tree)
+
+```
+
+```{r echo=TRUE}
+set.seed(12345)
+
+```
+
+###2.0 Pre-processing data
+
+###2.1 Load the data
+
+```{r echo=TRUE}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+```
+
+###2.2 Partition the training data into 2 sets
+```{r echo=TRUE}
+inTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+dim(myTraining)
+dim(myTesting)
+```
+
+### 2.3 Clean the data
+The following transformations were used to clean the data:
+
+1. Clean NearZeroVariance(NZV) variables to omit variables with no variability. 
+```{r echo=TRUE}
+myDataNZV <- nearZeroVar(myTraining, saveMetrics=TRUE)
+```
+
+Create another subset without NZV variables:
+```{r echo=TRUE}
+myNZVvars <- names(myTraining) %in% c("new_window", "kurtosis_roll_belt", "kurtosis_picth_belt",
+"kurtosis_yaw_belt", "skewness_roll_belt", "skewness_roll_belt.1", "skewness_yaw_belt",
+"max_yaw_belt", "min_yaw_belt", "amplitude_yaw_belt", "avg_roll_arm", "stddev_roll_arm",
+"var_roll_arm", "avg_pitch_arm", "stddev_pitch_arm", "var_pitch_arm", "avg_yaw_arm",
+"stddev_yaw_arm", "var_yaw_arm", "kurtosis_roll_arm", "kurtosis_picth_arm",
+"kurtosis_yaw_arm", "skewness_roll_arm", "skewness_pitch_arm", "skewness_yaw_arm",
+"max_roll_arm", "min_roll_arm", "min_pitch_arm", "amplitude_roll_arm", "amplitude_pitch_arm",
+"kurtosis_roll_dumbbell", "kurtosis_picth_dumbbell", "kurtosis_yaw_dumbbell", "skewness_roll_dumbbell",
+"skewness_pitch_dumbbell", "skewness_yaw_dumbbell", "max_yaw_dumbbell", "min_yaw_dumbbell",
+"amplitude_yaw_dumbbell", "kurtosis_roll_forearm", "kurtosis_picth_forearm", "kurtosis_yaw_forearm",
+"skewness_roll_forearm", "skewness_pitch_forearm", "skewness_yaw_forearm", "max_roll_forearm",
+"max_yaw_forearm", "min_roll_forearm", "min_yaw_forearm", "amplitude_roll_forearm",
+"amplitude_yaw_forearm", "avg_roll_forearm", "stddev_roll_forearm", "var_roll_forearm",
+"avg_pitch_forearm", "stddev_pitch_forearm", "var_pitch_forearm", "avg_yaw_forearm",
+"stddev_yaw_forearm", "var_yaw_forearm")
+myTraining <- myTraining[!myNZVvars]
+#To check the new No. of observations
+dim(myTraining)
+```
+
+2. Remove first column of dataset. By removing first "ID" variable, it will not interfere with Machine Learning Algorithms:
+```{r echo=TRUE}
+myTraining <- myTraining[c(-1)]
+```
+
+3. Clean variables with too many NAs. For Variables that have more than a 60% threshold of NA's will be removed.
+```{r echo=TRUE}
+trainingV3 <- myTraining #creating another subset to iterate in loop
+for(i in 1:length(myTraining)) { #for every column in the training dataset
+        if( sum( is.na( myTraining[, i] ) ) /nrow(myTraining) >= .6 ) { #if no. NAs > 60% of total observations
+        for(j in 1:length(trainingV3)) {
+            if( length( grep(names(myTraining[i]), names(trainingV3)[j]) ) ==1)  { #if the columns are the same:
+                trainingV3 <- trainingV3[ , -j] #Remove that column
+            }   
+        } 
+    }
+}
+#To check the new No. of observations
+dim(trainingV3)
+
+#Set values back to dataset
+myTraining <- trainingV3
+rm(trainingV3)
+
+```
+
+Do the exact same 3 transformations on myTesting and testing data sets.
+
+```{r echo=TRUE}
+clean1 <- colnames(myTraining)
+clean2 <- colnames(myTraining[, -58]) #already with classe column removed
+myTesting <- myTesting[clean1]
+testing <- testing[clean2]
+
+#To check the new No. of observations
+dim(myTesting)
+dim(testing)
+```
+
+In order to ensure proper functioning of Decision Trees and especially RandomForest Algorithm with the Test data set (data set provided), we need to coerce the data into the same type.
+
+```{r echo=TRUE}
+for (i in 1:length(testing) ) {
+        for(j in 1:length(myTraining)) {
+        if( length( grep(names(myTraining[i]), names(testing)[j]) ) ==1)  {
+            class(testing[j]) <- class(myTraining[i])
+        }      
+    }      
+}
+#And to make sure Coertion really worked, simple smart ass technique:
+testing <- rbind(myTraining[2, -58] , testing) #note row 2 does not mean anything, this will be removed right.. now:
+testing <- testing[-1,]
+```
+
+###3.0 Prediction Analysis - Model Building
+
+**3.1 Machine Learning Algorithm 1 - Classification Tree (CT)**
+
+Plot classification tree:
+```{r echo=TRUE}
+tree.training=tree(classe~.,data=myTraining)
+summary(tree.training)
+plot(tree.training)
+text(tree.training,pretty=1, cex =.8)
+
+```
+
+Estimated out of sample error:
+```{r echo=TRUE}
+modFitA1 <- rpart(classe ~ ., data=myTraining, method="class")
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+predMatrix = with(myTesting,table(predictionsA1,classe))
+sum(diag(predMatrix))/sum(as.vector(predMatrix)) # CT error rate
+```
+
+Cross validation - Using confusion Matrix to test results:
+```{r echo=TRUE}
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+confusionMatrix(predictionsA1, myTesting$classe)
+```
+
+**3.2 Machine Learning Algorithm 2 - Random Forest (RF)**
+```{r echo=TRUE}
+modFitB1 <- randomForest(classe ~. , data=myTraining)
+
+```
+
+Estimated out of sample error:
+```{r echo=TRUE}
+predictionsB1 <- predict(modFitB1, myTesting, type = "class")
+predMatrix = with(myTesting,table(predictionsB1,classe))
+sum(diag(predMatrix))/sum(as.vector(predMatrix)) # RF error rate
+```
+
+Cross validation - Using confusion Matrix to test results:
+```{r echo=TRUE}
+confusionMatrix(predictionsB1, myTesting$classe)
+
+```
+
+###4.0 Conclusion
+As expected, Random Forests yielded better results. The accuracy increases by 0.1197 using Random Forest algorithm as compared to Classification Tree algorithm.
+
+###5.0 Prediction Results
+
+Using the RF algorithm, we can now predict the testing data.
+```{r echo=TRUE}
+predictionResults <- predict(modFitB1, testing)
+predictionResults
+```
+
